@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FTC Hooded Shooter Velocity Calculator</title>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root" class="min-h-screen bg-gray-500"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    // Lucide icons as SVG components
+    const Calculator = () => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="2" width="16" height="20" rx="2"/>
+        <line x1="8" y1="6" x2="16" y2="6"/>
+        <line x1="16" y1="14" x2="16" y2="18"/>
+        <line x1="8" y1="14" x2="8" y2="18"/>
+        <line x1="12" y1="14" x2="12" y2="18"/>
+      </svg>
+    );
+
+    const Target = () => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="6"/>
+        <circle cx="12" cy="12" r="2"/>
+      </svg>
+    );
+
+    const Ruler = () => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/>
+        <path d="m14.5 12.5 2-2"/>
+        <path d="m11.5 9.5 2-2"/>
+        <path d="m8.5 6.5 2-2"/>
+        <path d="m17.5 15.5 2-2"/>
+      </svg>
+    );
+
+    function ShooterVelocityCalculator() {
+      const [distance, setDistance] = useState(36); // inches
+      const [shooterHeight, setShooterHeight] = useState(15); // height of shooter tip from ground (inches)
+      const [targetHeight, setTargetHeight] = useState(42); // height of target from ground (inches)
+      const [angle, setAngle] = useState(45); // launch angle in degrees
+      const [flywheelDiameterMM, setFlywheelDiameterMM] = useState(100); // mm
+      const [compressionMM, setCompressionMM] = useState(8); // mm of compression into the ball
+      const [gearRatio, setGearRatio] = useState(1); // motor to flywheel gear ratio
+      const [motorType, setMotorType] = useState('5202'); // Motor type selection
+      
+      // Calculate height difference
+      const height = targetHeight - shooterHeight;
+     
+      // Constants
+      const ballDiameter = 5; // inches
+      const ballDiameterMM = 127; // mm
+      const ballMass = 70; // grams
+      const gravity = 386.4; // inches/sec^2 (9.81 m/s^2 converted)
+      const ticksPerRev = 28; // encoder ticks per revolution
+     
+      // Calculate required ball velocity using projectile motion
+      const calculateBallVelocity = () => {
+        const angleRad = angle * Math.PI / 180;
+        const heightDiff = height;
+        const range = distance;
+       
+        // Correct projectile motion formula (ignoring air resistance):
+        // Derived from: y = x*tan(θ) - (g*x²)/(2*v₀²*cos²(θ))
+        // Solving for v₀: v₀ = sqrt(g*x² / (2*cos²(θ)*(x*tan(θ) - y)))
+       
+        const cosTheta = Math.cos(angleRad);
+        const tanTheta = Math.tan(angleRad);
+        
+        const numerator = gravity * range * range;
+        const denominator = 2 * cosTheta * cosTheta * (range * tanTheta - heightDiff);
+       
+        if (denominator <= 0) {
+          return null; // Invalid trajectory
+        }
+       
+        const velocity = Math.sqrt(numerator / denominator);
+        return velocity;
+      };
+     
+      // Calculate required flywheel RPM for hooded shooter
+      const calculateFlywheelRPM = (ballVelocity) => {
+        if (!ballVelocity) return null;
+       
+        // For a hooded shooter with compression:
+        // 1. Compression determines contact radius
+        //    Contact radius ≈ flywheel radius - (compression / 2)
+        // 2. Ball velocity = surface velocity at contact × efficiency
+        
+        const flywheelRadiusInches = (flywheelDiameterMM / 25.4) / 2; // Convert mm to inches, then get radius
+        const compressionInches = compressionMM / 25.4; // Convert mm to inches
+        
+        // Calculate effective contact radius
+        // As compression increases, contact point moves inward
+        const contactRadius = flywheelRadiusInches - (compressionInches / 2);
+        
+        // Transfer efficiency increases with compression (better grip)
+        // Base efficiency for hooded shooter is ~0.7, increases with compression
+        const baseEfficiency = 0.70;
+        const compressionBonus = Math.min(compressionMM / 100, 0.15); // Up to +15% efficiency
+        const efficiency = baseEfficiency + compressionBonus;
+        
+        const contactCircumference = 2 * Math.PI * contactRadius;
+        const requiredSurfaceVelocity = ballVelocity / efficiency;
+        const flywheelRPM = (requiredSurfaceVelocity * 60) / contactCircumference;
+       
+        return {rpm: flywheelRPM, contactRadius: contactRadius, efficiency: efficiency};
+      };
+     
+      // Convert RPM to motor ticks/sec
+      const rpmToTicksPerSec = (rpm) => {
+        if (!rpm) return null;
+        return (rpm / 60) * ticksPerRev;
+      };
+     
+      const ballVelocity = calculateBallVelocity();
+      const flywheelData = calculateFlywheelRPM(ballVelocity);
+      const flywheelRPM = flywheelData ? flywheelData.rpm : null;
+      const contactRadius = flywheelData ? flywheelData.contactRadius : 0;
+      const efficiency = flywheelData ? flywheelData.efficiency : 0;
+      const ticksPerSec = rpmToTicksPerSec(flywheelRPM);
+     
+      // Calculate flight time
+      const flightTime = ballVelocity ? (distance / (ballVelocity * Math.cos(angle * Math.PI / 180))) : 0;
+      
+      // Calculate surface velocity at contact point
+      const surfaceVelocity = flywheelRPM ? (2 * Math.PI * contactRadius * flywheelRPM / 60) : 0;
+     
+      return (
+        <div className="w-full max-w-4xl mx-auto p-6 bg-gradient-to-br from-red-400 to-red-500 rounded-lg shadow-lg">
+          <div className="flex items-center gap-3 mb-6">
+  <div className="w-8 h-8 text-red-500"><Calculator /></div>
+  <h1 className="text-3xl font-bold text-white">Quantum Hooded Shooter Calculator</h1>
+</div>
+         
+          <div className="bg-gray-700 rounded-lg p-6 mb-6 shadow-md">
+  <h2 className="text-xl font-semibold mb-4 text-orange-400">Ball & Field Parameters</h2>
+           
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                
+                  Distance to Target (inches)
+                </label>
+                <input
+                  type="range"
+                  min="12"
+                  max="144"
+                  value={distance}
+                  onChange={(e) => setDistance(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-sm text-gray-300 mt-1">
+                  <span>12"</span>
+                  <span className="font-bold text-red-500">{distance}"</span>
+                  <span>144"</span>
+                </div>
+              </div>
+             
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Shooter Tip Height (inches from ground)
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="18"
+                  value={shooterHeight}
+                  onChange={(e) => setShooterHeight(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-sm text-gray-300 mt-1">
+                  <span>0"</span>
+                  <span className="font-bold text-red-500">{shooterHeight}"</span>
+                  <span>18"</span>
+                </div>
+              </div>
+             
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Target Height (inches from ground)
+                </label>
+                <input
+                  type="range"
+                  min="41"
+                  max="52"
+                  value={targetHeight}
+                  onChange={(e) => setTargetHeight(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-sm text-gray-300 mt-1">
+                  <span>41"</span>
+                  <span className="font-bold text-red-500">{targetHeight}"</span>
+                  <span>52"</span>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Height difference: {height > 0 ? '+' : ''}{height}"
+                </div>
+              </div>
+             
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                   
+                  Launch Angle (degrees)
+                </label>
+                <input
+                  type="range"
+                  min="20"
+                  max="70"
+                  value={angle}
+                  onChange={(e) => setAngle(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-sm text-gray-300 mt-1">
+                  <span>20°</span>
+                  <span className="font-bold text-red-500">{angle}°</span>
+                  <span>70°</span>
+                </div>
+              </div>
+             
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Flywheel Diameter (mm)
+                </label>
+                <input
+                  type="range"
+                  min="50"
+                  max="150"
+                  step="1"
+                  value={flywheelDiameterMM}
+                  onChange={(e) => setFlywheelDiameterMM(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-sm text-gray-300 mt-1">
+                  <span>50mm</span>
+                  <span className="font-bold text-red-500">{flywheelDiameterMM}mm</span>
+                  <span>150mm</span>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  ({(flywheelDiameterMM / 25.4).toFixed(1)}" diameter)
+                </div>
+              </div>
+             
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Compression (mm into ball)
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="25"
+                  step="0.5"
+                  value={compressionMM}
+                  onChange={(e) => setCompressionMM(Number(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-sm text-gray-300 mt-1">
+                  <span>0mm</span>
+                  <span className="font-bold text-red-500">{compressionMM}mm</span>
+                  <span>25mm</span>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  How deep flywheel pushes into ball (6-10mm typical)
+                </div>
+              </div>
+            </div>
+          </div>
+         
+          {ballVelocity && ballVelocity > 0 ? (
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-6 shadow-md">
+              <h2 className="text-2xl font-bold mb-4 text-green-800">Results</h2>
+             
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-white rounded-lg p-4 shadow">
+                  <div className="text-sm text-gray-600 mb-1">Ball Exit Velocity</div>
+                  <div className="text-3xl font-bold text-blue-600">
+                    {ballVelocity.toFixed(1)} <span className="text-lg">in/s</span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {(ballVelocity / 12).toFixed(1)} ft/s
+                  </div>
+                </div>
+               
+                <div className="bg-white rounded-lg p-4 shadow">
+                  <div className="text-sm text-gray-600 mb-1">Required Flywheel RPM</div>
+                  <div className="text-3xl font-bold text-purple-600">
+                    {flywheelRPM.toFixed(0)} <span className="text-lg">RPM</span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Motor speed needed
+                  </div>
+                </div>
+               
+                <div className="bg-white rounded-lg p-4 shadow">
+                  <div className="text-sm text-gray-600 mb-1">Motor Velocity</div>
+                  <div className="text-3xl font-bold text-orange-600">
+                    {ticksPerSec.toFixed(0)} <span className="text-lg">ticks/s</span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    setVelocity() value
+                  </div>
+                </div>
+              </div>
+             
+              <div className="bg-white rounded-lg p-4 shadow mb-4">
+                <h3 className="font-semibold text-gray-700 mb-2">Code for Your Robot:</h3>
+                <div className="bg-gray-900 text-green-400 p-3 rounded font-mono text-sm">
+                  <div>// For {distance}" distance at {angle}° angle:</div>
+                  <div className="text-yellow-300 mt-2">flywheel.setVelocity({ticksPerSec.toFixed(0)});</div>
+                  <div className="text-gray-500 mt-2">// Flywheel RPM: {flywheelRPM.toFixed(0)}</div>
+                  <div className="text-gray-500">// Compression: {compressionMM}mm</div>
+                </div>
+              </div>
+             
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div className="bg-white rounded p-3">
+                  <div className="text-gray-600">Flight Time</div>
+                  <div className="font-bold text-gray-800">{flightTime.toFixed(2)}s</div>
+                </div>
+                <div className="bg-white rounded p-3">
+                  <div className="text-gray-600">Contact Radius</div>
+                  <div className="font-bold text-gray-800">{contactRadius.toFixed(2)}"</div>
+                </div>
+                <div className="bg-white rounded p-3">
+                  <div className="text-gray-600">Efficiency</div>
+                  <div className="font-bold text-gray-800">{(efficiency * 100).toFixed(0)}%</div>
+                </div>
+                <div className="bg-white rounded p-3">
+                  <div className="text-gray-600">Max Height</div>
+                  <div className="font-bold text-gray-800">
+                    {(height + (ballVelocity * Math.sin(angle * Math.PI / 180))**2 / (2 * gravity)).toFixed(1)}"
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-red-50 rounded-lg p-6 shadow-md">
+              <div className="text-red-800 font-semibold">
+                ⚠️ Invalid trajectory parameters
+              </div>
+              <div className="text-red-600 text-sm mt-2">
+                Try adjusting the angle or reducing the distance. The ball cannot reach the target with these settings.
+              </div>
+            </div>
+          )}
+         
+          <div className="mt-6 bg-blue-50 rounded-lg p-4 border-l-4 border-blue-500">
+            <h3 className="font-semibold text-blue-900 mb-2">📝 Hooded Shooter Guide</h3>
+            <div className="text-sm text-blue-800 space-y-1">
+              <div><strong>Distance:</strong> Horizontal distance from shooter to target</div>
+              <div><strong>Shooter Height:</strong> Height of your hooded shooter's exit point (0-18")</div>
+              <div><strong>Target Height:</strong> Height of the target you're aiming for</div>
+              <div><strong>Angle:</strong> Hood angle determines launch trajectory (typically 40-5°)</div>
+              <div><strong>Compression:</strong> How many mm the flywheel pushes into the ball surface</div>
+              <div><strong>Flywheel Diameter:</strong> Your flywheel wheel size in mm (typically 75-125mm)</div>
+            </div>
+          </div>
+         
+          <div className="mt-4 bg-yellow-50 rounded-lg p-4 border-l-4 border-yellow-500">
+            <h3 className="font-semibold text-yellow-900 mb-2">⚡ Important Notes for Hooded Shooters</h3>
+            <div className="text-sm text-yellow-800 space-y-1">
+              <div>• More compression = better grip but contact point moves inward (affects speed)</div>
+              <div>• Typical compression range: 3-6mm for good balance</div>
+              <div>• Too little compression (&lt;4mm) = inconsistent, too much (&gt;15mm) = less effective</div>
+              <div>• Test and adjust ±300 ticks/sec based on actual results</div>
+              <div>• Hood geometry determines launch angle - adjust hood position, not angle slider</div>
+              <div>• Your 6000 RPM motors can produce up to 2800 ticks/sec</div>
+            </div>
+          </div>
+          
+          <div className="mt-4 bg-purple-50 rounded-lg p-4 border-l-4 border-purple-500">
+            <h3 className="font-semibold text-purple-900 mb-2">🔧 Measuring Compression</h3>
+            <div className="text-sm text-purple-800 space-y-1">
+              <div>1. Measure the gap between hood and flywheel surface (with no ball)</div>
+              <div>2. Ball diameter is 127mm (5 inches)</div>
+              <div>3. Compression = 127mm - gap distance</div>
+              <div>4. Example: If gap is 122mm, compression = 127 - 122 = 5mm</div>
+              <div>5. Adjust your hood closer/farther to change compression</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<ShooterVelocityCalculator />, document.getElementById('root'));
+  </script>
+</body>
+</html>
